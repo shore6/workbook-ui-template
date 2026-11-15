@@ -1,0 +1,12 @@
+{
+  "name": "workbook-ui-template",
+  "private": true,
+  "description": "1ファイルで動く暗記・演習ドリルのテンプレート",
+  "type": "module",
+  "scripts": {
+    "check": "node tools/check.mjs",
+    "build": "node tools/build.mjs",
+    "new": "node tools/new.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
