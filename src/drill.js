@@ -68,8 +68,29 @@ const { rnd, pick, fmt, shuffle } = Drill.util;
 const TYPE_LABEL = { mc: "選択", tf: "○×", input: "単語", fill: "穴埋め", calc: "計算", order: "並べ替え", match: "対応付け", essay: "記述" };
 const KANA = ["ア", "イ", "ウ", "エ", "オ", "カ", "キ", "ク", "ケ", "コ"];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const br = s => esc(s).replace(/\n/g, "<br>");
 const red = s => s.replace(/\[\[(.+?)\]\]/g, '<span class="r">$1</span>');
+/** 問題文・解説・模範解答用：改行をそのまま表示し、`コード` と表を描画する。
+ *  表は「|」で始まる行（1行目が見出し行）。「|#名前」で表の名前を付け、続けて書いた表は横に並ぶ。 */
+function rich(s) {
+  const inline = t => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>");
+  const out = []; let block = null;
+  const flush = () => {
+    if (!block) return;
+    out.push(`<div class="qtables">${block.map(t => `<table class="qt">${t.cap ? `<caption>${inline(t.cap)}</caption>` : ""}${t.rows.map((r, i) =>
+      `<tr>${r.map(c => i === 0 ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table>`).join("")}</div>`);
+    block = null;
+  };
+  String(s).split("\n").forEach(line => {
+    if (/^\|/.test(line)) {
+      block = block || [];
+      if (/^\|#/.test(line)) { block.push({ cap: line.slice(2).trim(), rows: [] }); return; }
+      if (!block.length) block.push({ cap: "", rows: [] });
+      block[block.length - 1].rows.push(line.replace(/^\||\|\s*$/g, "").split("|").map(c => c.trim()));
+    } else { flush(); out.push(inline(line) + "<br>"); }
+  });
+  flush();
+  return out.join("").replace(/(<br>)+$/, "");
+}
 
 /** 内容から作る安定ID（問題を途中に追加しても成績がずれない） */
 function hashId(s) {
@@ -79,9 +100,10 @@ function hashId(s) {
 }
 
 // ---- 表記ゆれ吸収：全角半角・大小文字・ひらカタ・記号・空白・括弧書きを無視 ----
+// SQL などのコード入力向けに、引用符の種類（' と "）・末尾の ;・!= と <> の違いも無視する
 function norm(s) {
-  s = String(s).normalize("NFKC").toLowerCase();
-  s = s.replace(/[‘’`´]/g, "'").replace(/[“”]/g, '"');
+  s = String(s).normalize("NFKC").toLowerCase().trim();
+  s = s.replace(/[‘’`´"“”]/g, "'").replace(/;+$/, "").replace(/!=/g, "<>");
   s = s.replace(/[ぁ-ゖ]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
   return s.replace(/[\s・･,、。.「」『』()（）\[\]［］ー〜~\-_]/g, "");
 }
@@ -149,12 +171,25 @@ function sourceLabels() {
 // ---------------------------------------------------------------------
 // 4. データ検証（ブラウザのコンソールと tools/check.mjs の両方で使う）
 // ---------------------------------------------------------------------
+/** rich() の表で、見出し行と列数がちがう行を見つける */
+function checkTables(s) {
+  const e = []; let cols = null;
+  String(s || "").split("\n").forEach(line => {
+    if (!/^\|/.test(line) || /^\|#/.test(line)) { cols = null; return; }
+    const n = line.replace(/^\||\|\s*$/g, "").split("|").length;
+    if (cols === null) cols = n;
+    else if (n !== cols) e.push(`表の列数がそろっていない（見出し ${cols} 列、「${line.slice(0, 30)}」は ${n} 列）`);
+  });
+  return e;
+}
+
 function checkQ(q, where) {
   const e = [], isInt = (n, max) => Number.isInteger(n) && n >= 0 && n < max;
   const nonEmpty = a => Array.isArray(a) && a.length > 0 && a.every(x => String(x).trim());
   if (!q || typeof q !== "object") return [where + ": 問題オブジェクトがない"];
   if (!TYPE_LABEL[q.type]) e.push(`未知の形式 "${q.type}"`);
   if (!q.q || !String(q.q).trim()) e.push("問題文が空");
+  [q.q, q.exp, q.model].forEach(t => e.push(...checkTables(t)));
   switch (q.type) {
     case "mc":
       if (!Array.isArray(q.choices) || q.choices.length < 2) e.push("選択肢が2つ未満");
@@ -402,7 +437,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     const pct = RUN.endless ? 100 : Math.round(RUN.i / RUN.items.length * 100);
     let html = `<div class="qhead"><span>${n}</span><span class="tag t-${q.type}">${TYPE_LABEL[q.type]}</span><span class="chip">${esc(p.ch)}</span><span class="srcl">${esc(SRC_LABEL[p.src] || "")}${p.name ? "：" + esc(p.name) : ""}</span></div>
       <div class="prog"><span style="width:${pct}%"></span></div>
-      <div class="qtext">${br(q.q)}</div><div class="qbody">`;
+      <div class="qtext">${rich(q.q)}</div><div class="qbody">`;
     switch (q.type) {
       case "mc":
         // 2択や順序に意味がある選択肢（fixed）はシャッフルしない
@@ -497,7 +532,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     } else if (q.type === "essay") {
       const el = $("#a0"), v = el.value, nv = norm(v); el.readOnly = true;
       const kw = (q.kw || []).map(k => `<span class="kw${v && nv.includes(norm(k)) ? " hit" : ""}">${esc(k)}</span>`).join("");
-      $("#fb").innerHTML = `<div class="model"><h4>模範解答</h4><p>${br(q.model)}</p>${kw ? `<h4>キーワード</h4><div>${kw}</div>` : ""}${q.exp ? `<p class="exp">${br(q.exp)}</p>` : ""}</div>`;
+      $("#fb").innerHTML = `<div class="model"><h4>模範解答</h4><div>${rich(q.model)}</div>${kw ? `<h4>キーワード</h4><div>${kw}</div>` : ""}${q.exp ? `<div class="exp">${rich(q.exp)}</div>` : ""}</div>`;
       setActions(`<button class="good-b" data-s="1">○ できた</button><button class="mid-b" data-s="0">△ 一部</button><button class="bad-b" data-s="0">× できなかった</button>`);
       $$("#actions [data-s]").forEach(b => b.onclick = () => { it.ok = b.dataset.s === "1"; record(it.p.id, it.ok); go(); });
     }
@@ -505,7 +540,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
 
   function finish(it, ok, ansHtml, allowOverride) {
     it.ok = ok; record(it.p.id, ok);
-    $("#fb").innerHTML = `<div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}</div><div class="answer">${ansHtml}</div>${it.q.exp ? `<p class="exp">${br(it.q.exp)}</p>` : ""}
+    $("#fb").innerHTML = `<div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}</div><div class="answer">${ansHtml}</div>${it.q.exp ? `<div class="exp">${rich(it.q.exp)}</div>` : ""}
       ${allowOverride ? `<button class="mini" id="override">正解にする（表記ゆれ）</button>` : ""}`;
     const last = !RUN.endless && RUN.i >= RUN.items.length - 1;
     setActions(`<button class="primary" id="next">${last ? "結果へ" : "次へ →"}</button>`);
@@ -527,7 +562,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   function showResult() {
     const done = RUN.items.filter(x => x.ok !== null), ok = done.filter(x => x.ok).length, wrong = done.filter(x => !x.ok);
     $("#quiz-run").hidden = true; $("#quiz-result").hidden = false;
-    const cut = s => esc(s.length > 90 ? s.slice(0, 90) + "…" : s);
+    const cut = s => (s = s.split("\n").filter(l => !/^\|/.test(l)).join(" "), esc(s.length > 90 ? s.slice(0, 90) + "…" : s));
     $("#quiz-result").innerHTML = `<div class="card"><h2>結果</h2><div class="score"><b>${ok}</b> / ${done.length} 問 <span>${done.length ? Math.round(ok / done.length * 100) : 0}%</span></div>
       ${wrong.length ? `<h3>間違えた問題</h3><ul class="wronglist">${wrong.map(x => `<li><span class="tag t-${x.q.type}">${TYPE_LABEL[x.q.type]}</span> ${cut(x.q.q)}</li>`).join("")}</ul>` : done.length ? "<p>全問正解！</p>" : ""}
       <div class="actions">${wrong.length ? `<button class="primary" id="retry">間違えた問題をもう一度</button>` : ""}<button class="ghost" id="again">出題設定へ</button></div></div>`;
