@@ -297,7 +297,7 @@ function boot() {
 <section id="view-home"><div class="quick" id="quick"></div><div class="card seqcard pastcard" id="home-past"></div><div class="card seqcard" id="home-seq"></div><div class="card" id="home-stats"></div></section>
 <section id="view-summary" hidden><div class="toolbar">${sheetBtn}</div><div id="summary-body"></div></section>
 <section id="view-terms" hidden>
-  <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select></div><div class="seg" id="term-hide" role="group" aria-label="赤シートで隠す側"><button data-hide="term">用語を隠す</button><button data-hide="def">説明を隠す</button></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
+  <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select><label class="tonly"><input type="checkbox" id="term-only"> チェックした用語だけ</label></div><div class="seg" id="term-hide" role="group" aria-label="赤シートで隠す側"><button data-hide="term">用語を隠す</button><button data-hide="def">説明を隠す</button></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
   <div class="card" id="term-list"></div></section>
 <section id="view-quiz" hidden>
   <div id="quiz-setup">
@@ -507,19 +507,37 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     try { localStorage.setItem(HIDE_KEY, v); } catch (e) {}
     renderTerms();
   }
+  // 用語のチェック：節＋用語名で覚える（説明を直しても外れない）。「チェックした用語だけ」の ON/OFF も保存
+  const MARK_KEY = C.storageKey + ":termmark";
+  const termKey = g => g[0] + "\u0001" + g[1];
+  let MARKS = new Set(), MARK_ONLY = false;
+  try {
+    const m = JSON.parse(localStorage.getItem(MARK_KEY) || "{}");
+    MARKS = new Set(Array.isArray(m.keys) ? m.keys : []); MARK_ONLY = !!m.only;
+  } catch (e) {}
+  function termCount(shown) {
+    const marked = S.terms.filter(g => MARKS.has(termKey(g))).length;
+    $("#term-count").textContent = shown + " 語" + (marked ? `（チェック ${marked}）` : "");
+    return marked;
+  }
+  function saveMarks() { try { localStorage.setItem(MARK_KEY, JSON.stringify({ keys: [...MARKS], only: MARK_ONLY })); } catch (e) {} }
   function renderTerms() {
     const qv = norm($("#term-q").value || ""), ch = $("#term-ch").value;
-    const list = S.terms.filter(g => (!ch || g[0] === ch) && (!qv || norm(g[1] + g[2] + g[3].join("")).includes(qv)));
+    const inScope = g => (!ch || g[0] === ch) && (!qv || norm(g[1] + g[2] + g[3].join("")).includes(qv));
+    const list = S.terms.filter(g => inScope(g) && (!MARK_ONLY || MARKS.has(termKey(g))));
     const hideDef = TERM_HIDE === "def";
     $$("#term-hide button").forEach(b => b.setAttribute("aria-pressed", b.dataset.hide === TERM_HIDE));
-    $("#term-count").textContent = list.length + " 語";
+    $("#term-only").checked = MARK_ONLY;
+    const marked = termCount(list.length);
     $("#term-list").classList.toggle("hidedef", hideDef);
-    $("#term-list").innerHTML = list.map(([c, t, d, a]) => {
+    $("#term-list").innerHTML = list.map(g => {
+      const [c, t, d, a] = g, k = termKey(g), on = MARKS.has(k);
       const alt = a.length ? `<small>${esc(a.join("／"))}</small>` : "";
       const name = hideDef ? `<b>${esc(t)}</b>${alt}` : `<span class="r">${esc(t)}</span>${alt}`;
       const def = hideDef ? `<span class="r">${esc(d)}</span>` : esc(d);
-      return `<div class="term"><div class="tname">${name}</div><div class="tdef"><span class="chip">${esc(c)}</span>${def}</div></div>`;
-    }).join("");
+      const box = `<input type="checkbox" class="tmark" data-k="${esc(k)}"${on ? " checked" : ""} aria-label="${esc(t)} にチェック">`;
+      return `<div class="term${on ? " marked" : ""}">${box}<div class="tname">${name}</div><div class="tdef"><span class="chip">${esc(c)}</span>${def}</div></div>`;
+    }).join("") || `<p class="hint tempty">${MARK_ONLY && !marked ? "チェックした用語はまだありません。各用語の左のチェックボックスで印を付けられます。" : "該当する用語がありません。"}</p>`;
   }
 
   // ---- 出題設定（選択肢が1つしかない絞り込みは出さない） ----
@@ -786,6 +804,13 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   $("#term-ch").innerHTML = `<option value="">すべての節</option>` + Object.keys(SECTIONS).filter(c => S.terms.some(t => t[0] === c)).map(c => `<option value="${esc(c)}">${esc(SECTIONS[c])}</option>`).join("");
   $("#term-q").oninput = renderTerms; $("#term-ch").onchange = renderTerms;
   $$("#term-hide button").forEach(b => b.onclick = () => setTermHide(b.dataset.hide));
+  $("#term-only").onchange = e => { MARK_ONLY = e.target.checked; saveMarks(); renderTerms(); };
+  $("#term-list").addEventListener("change", e => {
+    const b = e.target.closest(".tmark"); if (!b) return;
+    b.checked ? MARKS.add(b.dataset.k) : MARKS.delete(b.dataset.k); saveMarks();
+    // 「だけ」表示中に外しても行はすぐ消さない（押し間違えてもその場で戻せる）。次に表示し直したときに消える
+    b.closest(".term").classList.toggle("marked", b.checked); termCount($$("#term-list .term").length);
+  });
   $$(".sheetbtn").forEach(b => b.onclick = toggleSheet);
   $("#start").onclick = () => startQuiz(readSetup());
   $("#reset").onclick = () => {
