@@ -17,6 +17,7 @@ for (const dir of resolveSubjects(process.argv.slice(2))) {
   console.log(`  形式  ${fmt(st.byType)}`);
   console.log(`  節    ${fmt(st.bySection)}`);
   console.log(`  出典  ${fmt(st.bySource)}`);
+  if (Object.keys(st.byPast).length) console.log(`  過去問 ${fmt(st.byPast)}`);
   errors.forEach(e => console.log("  ERROR " + e));
   warnings.forEach(w => console.log("  warn  " + w));
   if (errors.length) failed = true;

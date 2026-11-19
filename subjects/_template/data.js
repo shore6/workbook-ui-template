@@ -14,15 +14,16 @@ Drill.setup({
   sources: {                           // 出典ID: 表示名（1種類だけなら絞り込み欄は出ない）
     slide: "スライドの問題",
     orig: "オリジナル",
+    past: "過去問",
   },
   // ホームのボタン。文字列は組み込み、オブジェクトは絞り込み条件つきの独自ボタン
   quick: [
     "mix",
     { label: "スライドの問題", desc: "資料の順に全部", srcs: ["slide"], count: 0, order: "seq" },
-    "terms", "drill", "essay", "weak",
+    "past", "terms", "drill", "essay", "weak",   // "past" は過去問があるときだけ出る
   ],
 });
-const { source, mc, tf, inp, fill, calc, ord, match, essay, terms, generators, summary } = Drill;
+const { source, past, mc, tf, inp, fill, calc, ord, match, essay, terms, generators, summary } = Drill;
 const { rnd, pick, fmt } = Drill.util;
 
 // ---------------------------------------------------------------------
@@ -60,6 +61,14 @@ mc("1.2", "|#R\n|A|B\n|1|x\n|2|y\n|#S\n|A|B\n|2|y\n|3|z\n`SELECT * FROM R UNION 
 
 // 記述：模範解答とキーワード（含まれた語が緑になる）→ 自己採点
 essay("1.2", "VLAN を使う利点を説明せよ。", "物理的な配線を変えずに、ネットワークを論理的に分割できる。", ["物理", "論理", "分割"]);
+
+// 過去問：past("試験名") 以降の問題に過去問の印が付く（past(null) で解除）。形式は自由。
+// ホームの「過去問」ボタンと「本番形式で通す」（時間と正答率を記録）に出る。minutes は制限時間の初期値
+source("past");
+past("2025年度 期末", { minutes: 50 });
+mc("1.1", "【過去問】TCP/IP のトランスポート層のプロトコルはどれか。", ["IP", "TCP", "HTTP", "Ethernet"], 1);
+essay("1.2", "【過去問】スループットについて、「単位時間」を使って説明せよ。", "単位時間あたりに処理・転送できるデータ量。", ["単位時間"]);
+past(null);
 
 // ---------------------------------------------------------------------
 // 用語集 [節, 用語, 説明, 別解[]]  → 用語集ページ＋「説明→用語」の入力・選択問題を自動生成

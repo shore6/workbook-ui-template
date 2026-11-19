@@ -184,3 +184,19 @@ table.qt th{background:#e9eef5;font-weight:700}
 .seqcard .setrow{margin:10px 0 0}
 #quiz-result .seqhead{margin-top:12px}
 .seqtag{font-size:.74rem;font-weight:700;padding:1px 8px;border-radius:99px;background:#e9eef5;color:var(--accent);font-variant-numeric:tabular-nums}
+
+/* ---- 過去問・本番形式 ---- */
+.pasttag{font-size:.74rem;font-weight:700;padding:1px 8px;border-radius:99px;background:#fdecc8;color:#8a4b00;white-space:nowrap}
+.timer{font-size:.85rem;font-weight:700;padding:1px 10px;border-radius:99px;background:var(--accent);color:#fff;font-variant-numeric:tabular-nums}
+.timer.warn{background:var(--ng)}
+.pastrow{border-top:1px dashed var(--line);padding:10px 0 2px}
+.pastrow:first-of-type{border-top:none}
+.pastname{display:flex;align-items:baseline;gap:10px}
+.pastrow .setrow{margin-top:6px}
+#quiz-result .kpis{margin:12px 0 4px}
+.examlist{padding-left:2em;font-size:.9rem;margin:.4em 0 1em}
+.examlist li{margin:.3em 0}
+.examlist .emark,.examlist .chnum{display:inline-block;margin-right:8px}
+.emark{font-weight:900;min-width:1.2em;text-align:center}
+.emark.ok{color:var(--ok)}.emark.ng{color:var(--ng)}.emark.na{color:var(--sub)}
+.pastcard > .hint + .pastrow{border-top:none}
