@@ -271,6 +271,7 @@ function boot() {
   function record(id, ok) {
     const s = STATS[id] || { c: 0, w: 0, last: null };
     ok ? s.c++ : s.w++; s.last = ok ? 1 : 0; STATS[id] = s; saveStats();
+    if (RUN && RUN.seq && !RUN.seq.retry) markSeq(id);
   }
   const isWeak = p => STATS[p.id] && STATS[p.id].last === 0;
 
@@ -284,13 +285,14 @@ function boot() {
 <header><div class="hwrap"><div class="logo">${esc(C.title)}${C.subtitle ? `<small>${esc(C.subtitle)}</small>` : ""}</div>
 <nav>${VIEWS.map(v => `<a href="#${v}">${NAV[v]}</a>`).join("")}</nav></div></header>
 <main>
-<section id="view-home"><div class="quick" id="quick"></div><div class="card" id="home-stats"></div></section>
+<section id="view-home"><div class="quick" id="quick"></div><div class="card seqcard" id="home-seq"></div><div class="card" id="home-stats"></div></section>
 <section id="view-summary" hidden><div class="toolbar">${sheetBtn}</div><div id="summary-body"></div></section>
 <section id="view-terms" hidden>
   <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
   <div class="card" id="term-list"></div></section>
 <section id="view-quiz" hidden>
   <div id="quiz-setup">
+    <div class="card seqcard" id="setup-seq"></div>
     <div class="setgrid" id="set-grid"></div>
     <div class="setrow">
       <label>問題数 <select id="set-count">${[10, 20, 30, 50, 100].map(n => `<option value="${n}"${n === 20 ? " selected" : ""}>${n}問</option>`).join("")}<option value="0">全問</option></select></label>
@@ -352,6 +354,53 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
       <p class="typecount">${Object.entries(TYPE_LABEL).filter(([t]) => byType[t]).map(([t, l]) => `<span class="tag t-${t}">${l} ${byType[t]}</span>`).join(" ")}</p>
       <h3>節ごとの習得状況</h3>${rows}`;
     $$("#home-stats [data-ch]").forEach(b => b.onclick = () => startQuiz({ ...ALL(), chs: [b.dataset.ch] }));
+    renderSeqCard($("#home-seq"));
+  }
+
+  // ---- 通し演習：全形式・全範囲を節の順に区切って解く。どこまで解いたかを保存して再開できる ----
+  const SEQ_KEY = KEY + ":seq", SEQ_SIZES = [5, 10, 20, 30, 50];
+  let SEQ = { done: [], size: 10 };
+  try { SEQ = { ...SEQ, ...JSON.parse(localStorage.getItem(SEQ_KEY) || "{}") }; } catch (e) { /* 既定値のまま */ }
+  const SEQ_DONE = new Set(SEQ.done);
+  const saveSeq = () => { SEQ.done = [...SEQ_DONE]; try { localStorage.setItem(SEQ_KEY, JSON.stringify(SEQ)); } catch (e) {} };
+  function markSeq(id) { if (!SEQ_DONE.has(id)) { SEQ_DONE.add(id); saveSeq(); } }
+  // 節の定義順 → 同じ節の中は登録順（問題 → 用語 → 計算ジェネレータ）
+  const secIdx = Object.fromEntries(Object.keys(SECTIONS).map((c, i) => [c, i]));
+  const SEQ_LIST = POOL.map((p, i) => [p, i]).sort((a, b) => ((secIdx[a[0].ch] ?? 1e9) - (secIdx[b[0].ch] ?? 1e9)) || a[1] - b[1]).map(x => x[0]);
+  const SEQ_POS = new Map(SEQ_LIST.map((p, i) => [p.id, i + 1]));
+  const seqProgress = () => {
+    const rest = SEQ_LIST.filter(p => !SEQ_DONE.has(p.id)); // 問題を消したあとの古いIDは数えない
+    return { done: SEQ_LIST.length - rest.length, total: SEQ_LIST.length, rest };
+  };
+  function renderSeqCard(box) {
+    const { done, total, rest } = seqProgress();
+    if (!total) { box.hidden = true; return; }
+    const label = !done ? "最初から始める" : rest.length ? `続きから（${SEQ_POS.get(rest[0].id)}問目〜）` : "もう一周する";
+    box.innerHTML = `<div class="seqhead"><h3>通し演習</h3><span class="chnum">${done} / ${total} 問</span></div>
+      <div class="bar"><span style="width:${Math.round(done / total * 100)}%"></span></div>
+      <p class="hint">${rest.length ? "全形式・全範囲を節の順に、区切りごとに解きます。途中でやめても続きから再開できます。" : "全問解き終わりました。"}</p>
+      <div class="setrow"><button class="primary" data-seq="go">${label}</button>
+        <label>区切り <select data-seq="size">${SEQ_SIZES.map(n => `<option value="${n}"${n === SEQ.size ? " selected" : ""}>${n}問</option>`).join("")}</select></label>
+        ${done ? `<button class="ghost" data-seq="reset" style="margin-left:auto">進み具合をリセット</button>` : ""}</div>`;
+    $("[data-seq=size]", box).onchange = e => { SEQ.size = +e.target.value; saveSeq(); };
+    $("[data-seq=go]", box).onclick = () => { if (!rest.length) { SEQ_DONE.clear(); saveSeq(); } startSeq(); };
+    const r = $("[data-seq=reset]", box);
+    if (r) r.onclick = () => {
+      if (!r.dataset.armed) { r.dataset.armed = 1; r.textContent = "もう一度押すと最初に戻る"; return; }
+      SEQ_DONE.clear(); saveSeq(); renderSeqCard(box);
+    };
+  }
+  function startSeq() {
+    const { rest } = seqProgress();
+    if (!rest.length) { RUN = null; location.hash = "#home"; renderHome(); return; }
+    const chunk = rest.slice(0, SEQ.size);
+    RUN = { items: chunk.map(newItem), i: 0, endless: false, seq: { retry: false, from: SEQ_POS.get(chunk[0].id), round: 0 } };
+    showRun();
+  }
+  function retrySeq(wrong) {
+    RUN = { items: shuffle(wrong.map(x => ({ p: x.p, q: x.p.gen ? x.q : x.p.make(), ok: null }))), i: 0, endless: false,
+      seq: { ...RUN.seq, retry: true, round: RUN.seq.round + 1 } };
+    showRun();
   }
 
   // ---- まとめ ----
@@ -391,6 +440,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   // ---- 出題設定（選択肢が1つしかない絞り込みは出さない） ----
   function renderSetup() {
     $("#quiz-setup").hidden = false; $("#quiz-run").hidden = true; $("#quiz-result").hidden = true;
+    renderSeqCard($("#setup-seq"));
     const cnt = f => POOL.filter(f).length;
     const groups = [
       ["ch", "範囲", Object.entries(SECTIONS).map(([k, l]) => [k, l, cnt(p => p.ch === k)])],
@@ -435,7 +485,8 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     const it = RUN.items[RUN.i], q = it.q, p = it.p;
     const n = RUN.endless ? `${RUN.i + 1}問目（正解 ${RUN.items.filter(x => x.ok).length}）` : `${RUN.i + 1} / ${RUN.items.length}`;
     const pct = RUN.endless ? 100 : Math.round(RUN.i / RUN.items.length * 100);
-    let html = `<div class="qhead"><span>${n}</span><span class="tag t-${q.type}">${TYPE_LABEL[q.type]}</span><span class="chip">${esc(p.ch)}</span><span class="srcl">${esc(SRC_LABEL[p.src] || "")}${p.name ? "：" + esc(p.name) : ""}</span></div>
+    const seqTag = RUN.seq ? `<span class="seqtag">${RUN.seq.retry ? `やり直し${RUN.seq.round > 1 ? RUN.seq.round + "回目" : ""}` : "通し"} ${SEQ_POS.get(p.id)}/${SEQ_LIST.length}</span>` : "";
+    let html = `<div class="qhead"><span>${n}</span>${seqTag}<span class="tag t-${q.type}">${TYPE_LABEL[q.type]}</span><span class="chip">${esc(p.ch)}</span><span class="srcl">${esc(SRC_LABEL[p.src] || "")}${p.name ? "：" + esc(p.name) : ""}</span></div>
       <div class="prog"><span style="width:${pct}%"></span></div>
       <div class="qtext">${rich(q.q)}</div><div class="qbody">`;
     switch (q.type) {
@@ -563,12 +614,38 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     const done = RUN.items.filter(x => x.ok !== null), ok = done.filter(x => x.ok).length, wrong = done.filter(x => !x.ok);
     $("#quiz-run").hidden = true; $("#quiz-result").hidden = false;
     const cut = s => (s = s.split("\n").filter(l => !/^\|/.test(l)).join(" "), esc(s.length > 90 ? s.slice(0, 90) + "…" : s));
+    if (RUN.seq) return showSeqResult(done, ok, wrong, cut);
     $("#quiz-result").innerHTML = `<div class="card"><h2>結果</h2><div class="score"><b>${ok}</b> / ${done.length} 問 <span>${done.length ? Math.round(ok / done.length * 100) : 0}%</span></div>
       ${wrong.length ? `<h3>間違えた問題</h3><ul class="wronglist">${wrong.map(x => `<li><span class="tag t-${x.q.type}">${TYPE_LABEL[x.q.type]}</span> ${cut(x.q.q)}</li>`).join("")}</ul>` : done.length ? "<p>全問正解！</p>" : ""}
       <div class="actions">${wrong.length ? `<button class="primary" id="retry">間違えた問題をもう一度</button>` : ""}<button class="ghost" id="again">出題設定へ</button></div></div>`;
     const r = $("#retry");
     if (r) r.onclick = () => { RUN = { items: shuffle(wrong.map(x => ({ p: x.p, q: x.p.gen ? x.q : x.p.make(), ok: null }))), i: 0, endless: false }; showRun(); };
     $("#again").onclick = () => { RUN = null; renderSetup(); };
+  }
+
+  // 区切りの結果：間違えた問題だけやり直す／次の区切りへ／ここでやめる
+  function showSeqResult(done, ok, wrong, cut) {
+    const { done: nDone, total, rest } = seqProgress(), sq = RUN.seq;
+    const to = Math.max(...RUN.items.map(x => SEQ_POS.get(x.p.id)));
+    const partial = done.length < RUN.items.length;
+    const title = sq.retry ? `やり直し${sq.round > 1 ? `（${sq.round}回目）` : ""}の結果` : `${sq.from}〜${to}問目の結果${partial ? "（途中で終了）" : ""}`;
+    const nextLabel = !rest.length ? "" : partial && !sq.retry ? `続きから（${SEQ_POS.get(rest[0].id)}問目〜）` : `次の${Math.min(SEQ.size, rest.length)}問へ →`;
+    $("#quiz-result").innerHTML = `<div class="card"><h2>${title}</h2>
+      <div class="score"><b>${ok}</b> / ${done.length} 問 <span>${done.length ? Math.round(ok / done.length * 100) : 0}%</span></div>
+      <div class="seqhead"><span class="hint">通し演習の進み具合</span><span class="chnum">${nDone} / ${total} 問</span></div>
+      <div class="bar"><span style="width:${Math.round(nDone / total * 100)}%"></span></div>
+      ${wrong.length ? `<h3>間違えた問題</h3><ul class="wronglist">${wrong.map(x => `<li><span class="tag t-${x.q.type}">${TYPE_LABEL[x.q.type]}</span> ${cut(x.q.q)}</li>`).join("")}</ul>`
+        : done.length ? `<p>${sq.retry ? "全部できました！" : "全問正解！"}</p>` : ""}
+      ${rest.length ? "" : `<p><b>全 ${total} 問を解き終わりました。</b>おつかれさまでした。</p>`}
+      <div class="actions">
+        ${wrong.length ? `<button class="primary" id="seq-retry">間違えた ${wrong.length} 問だけやり直す</button>` : ""}
+        ${nextLabel ? `<button class="${wrong.length ? "ghost" : "primary"}" id="seq-next">${nextLabel}</button>` : ""}
+        <button class="ghost" id="seq-quit">ここでやめる</button></div>
+      <p class="hint">進み具合は1問ごとに保存しています。ホームの「通し演習」から続きを再開できます。</p></div>`;
+    const r = $("#seq-retry"); if (r) r.onclick = () => retrySeq(wrong);
+    const n = $("#seq-next"); if (n) n.onclick = startSeq;
+    $("#seq-quit").onclick = () => { RUN = null; location.hash = "#home"; renderHome(); };
+    if (fine()) ($("#quiz-result .actions .primary") || $("#seq-quit")).focus();
   }
 
   // ---- キーボード：1〜9 で選択肢、Enter で次へ（PC 向け） ----
