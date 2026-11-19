@@ -18,20 +18,28 @@ const S = {
     sources: {},              // { slide: "スライド", ... }    出典ラベル
     termSource: "用語",        // 用語集から自動生成する問題の出典名
     genSource: "ランダム計算",  // ジェネレータ問題の出典名
-    quick: ["mix", "terms", "drill", "essay", "weak"],
+    quick: ["mix", "past", "terms", "drill", "essay", "weak"],
   },
   Q: [], terms: [], gens: [], summary: [],
   src: "main",
+  past: null,               // 以降に登録する問題が属する過去問（試験名）
+  exams: {},                // { 試験名: { minutes } }  登録順＝表示順
 };
 
 const arr = v => Array.isArray(v) ? v : [v];
-function add(type, ch, q, extra) { S.Q.push({ type, ch, src: S.src, q, ...extra }); }
+function add(type, ch, q, extra) { S.Q.push({ type, ch, src: S.src, q, ...(S.past ? { past: S.past } : {}), ...extra }); }
 
 const Drill = {
   /** 科目の設定。複数回呼んでもマージされる */
   setup(conf) { Object.assign(S.conf, conf); },
   /** 以降に登録する問題の出典 */
   source(key) { S.src = key; },
+  /** 以降に登録する問題を過去問として印を付ける。past(null) で解除。
+   *  opt.minutes を書くと、本番形式で通すときの制限時間の初期値になる */
+  past(name = "過去問", opt = {}) {
+    S.past = name || null;
+    if (S.past) S.exams[S.past] = { ...(S.exams[S.past] || {}), ...opt };
+  },
 
   // 問題形式ごとのヘルパ（引数の並びは「節, 問題文, 形式固有…, 解説」で統一）
   mc(ch, q, choices, ans, exp = "", opt = {}) { add("mc", ch, q, { choices, ans, exp, ...opt }); },
@@ -130,7 +138,7 @@ function buildPool() {
     pool.push({ id, ...p });
   };
   S.Q.forEach(q => push(q.type[0] + hashId(q.type + q.q + JSON.stringify(q.choices || q.blanks || q.parts || q.items || q.left || "")),
-    { ch: q.ch, src: q.src, type: q.type, make: () => q }));
+    { ch: q.ch, src: q.src, type: q.type, past: q.past || null, make: () => q }));
 
   S.terms.forEach(([ch, term, def, alt], i) => {
     const src = "term";
@@ -150,8 +158,9 @@ function buildPool() {
     push("g" + hashId(g.name), { ch: g.ch, src: "gen", type, gen: true, name: g.name, make: () => g.fn() });
   });
 
-  const stats = { total: pool.length, byType: {}, bySection: {}, bySource: {} };
+  const stats = { total: pool.length, byType: {}, bySection: {}, bySource: {}, byPast: {} };
   pool.forEach(p => {
+    if (p.past) stats.byPast[p.past] = (stats.byPast[p.past] || 0) + 1;
     stats.byType[p.type] = (stats.byType[p.type] || 0) + 1;
     stats.bySection[p.ch] = (stats.bySection[p.ch] || 0) + 1;
     stats.bySource[p.src] = (stats.bySource[p.src] || 0) + 1;
@@ -257,7 +266,7 @@ function boot() {
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const fine = () => window.matchMedia("(pointer:fine)").matches;
-  const ALL = () => ({ chs: Object.keys(SECTIONS), types: Object.keys(TYPE_LABEL), srcs: Object.keys(SRC_LABEL), count: 20, weak: false, order: "random" });
+  const ALL = () => ({ chs: Object.keys(SECTIONS), types: Object.keys(TYPE_LABEL), srcs: Object.keys(SRC_LABEL), count: 20, weak: false, past: false, order: "random" });
 
   const v = validate();
   if (v.errors.length) console.error("[drill] データエラー\n" + v.errors.join("\n"));
@@ -285,19 +294,21 @@ function boot() {
 <header><div class="hwrap"><div class="logo">${esc(C.title)}${C.subtitle ? `<small>${esc(C.subtitle)}</small>` : ""}</div>
 <nav>${VIEWS.map(v => `<a href="#${v}">${NAV[v]}</a>`).join("")}</nav></div></header>
 <main>
-<section id="view-home"><div class="quick" id="quick"></div><div class="card seqcard" id="home-seq"></div><div class="card" id="home-stats"></div></section>
+<section id="view-home"><div class="quick" id="quick"></div><div class="card seqcard pastcard" id="home-past"></div><div class="card seqcard" id="home-seq"></div><div class="card" id="home-stats"></div></section>
 <section id="view-summary" hidden><div class="toolbar">${sheetBtn}</div><div id="summary-body"></div></section>
 <section id="view-terms" hidden>
   <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
   <div class="card" id="term-list"></div></section>
 <section id="view-quiz" hidden>
   <div id="quiz-setup">
+    <div class="card seqcard pastcard" id="setup-past"></div>
     <div class="card seqcard" id="setup-seq"></div>
     <div class="setgrid" id="set-grid"></div>
     <div class="setrow">
       <label>問題数 <select id="set-count">${[10, 20, 30, 50, 100].map(n => `<option value="${n}"${n === 20 ? " selected" : ""}>${n}問</option>`).join("")}<option value="0">全問</option></select></label>
       <label>順番 <select id="set-order"><option value="random">ランダム</option><option value="seq">資料の順</option></select></label>
       <label><input type="checkbox" id="set-weak"> 間違えた問題だけ</label>
+      <label id="set-past-l"><input type="checkbox" id="set-past"> 過去問だけ</label>
     </div>
     <div class="setrow"><button class="primary" id="start">スタート</button><span id="set-avail"></span><button class="ghost" id="reset" style="margin-left:auto">成績をリセット</button></div>
   </div>
@@ -327,6 +338,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     terms: { label: "用語30問", desc: "説明を読んで用語を入力", o: { srcs: ["term"], types: ["input"], count: 30 } },
     essay: { label: "記述10問", desc: "模範解答で自己採点", o: { types: ["essay"], count: 10 } },
     weak: { label: "苦手復習", desc: "直近で間違えた問題", o: { weak: true, count: 0 } },
+    past: { label: "過去問", desc: "過去問を順番に全部", o: { past: true, count: 0, order: "seq" } },
     drill: { label: "計算ドリル", desc: "数値が毎回変わる・終わりなし", drill: true },
   };
   const quickItems = () => C.quick.map(k => typeof k === "string" ? QUICK[k] : { label: k.label, desc: k.desc || "", o: k }).filter(Boolean);
@@ -355,6 +367,62 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
       <h3>節ごとの習得状況</h3>${rows}`;
     $$("#home-stats [data-ch]").forEach(b => b.onclick = () => startQuiz({ ...ALL(), chs: [b.dataset.ch] }));
     renderSeqCard($("#home-seq"));
+    renderPastCard($("#home-past"));
+  }
+
+  // ---- 過去問：本番形式で通して、解答時間と正答率を測る。結果は履歴として保存 ----
+  const EXAMS = Object.keys(S.exams).map(name => ({ name, ...S.exams[name], list: POOL.filter(p => p.past === name) })).filter(e => e.list.length);
+  const PAST_KEY = KEY + ":past", LIMITS = [0, 10, 20, 30, 45, 50, 60, 90];
+  let PAST = {};
+  try { PAST = JSON.parse(localStorage.getItem(PAST_KEY) || "{}"); } catch (e) { PAST = {}; }
+  const savePast = () => { try { localStorage.setItem(PAST_KEY, JSON.stringify(PAST)); } catch (e) {} };
+  const mmss = ms => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+  const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+  function renderPastCard(box) {
+    if (!EXAMS.length) { box.hidden = true; return; }
+    box.innerHTML = `<div class="seqhead"><h3>過去問</h3></div>
+      <p class="hint">「本番形式で通す」は全問を出題順に解き、解答時間（答え合わせまでの時間）と正答率を記録します。</p>` +
+      EXAMS.map((e, i) => {
+        const hist = (PAST[e.name] || {}).runs || [], last = hist[hist.length - 1];
+        const best = hist.reduce((b, r) => !b || r.ok / r.total > b.ok / b.total || (r.ok / r.total === b.ok / b.total && r.ms < b.ms) ? r : b, null);
+        const lim = (PAST[e.name] || {}).limit ?? e.minutes ?? 0;
+        const opts = [...new Set([...LIMITS, e.minutes || 0])].sort((a, b) => a - b);
+        const fmtRun = r => `${r.ok}/${r.total}問（${pct(r.ok, r.total)}%）${mmss(r.ms)}${r.timeout ? " 時間切れ" : r.answered < r.total ? " 途中終了" : ""}`;
+        return `<div class="pastrow" data-x="${i}"><div class="pastname"><b>${esc(e.name)}</b><span class="chnum">${e.list.length}問</span></div>
+          ${hist.length ? `<p class="hint">前回 ${fmtRun(last)}　最高 ${fmtRun(best)}　（${hist.length}回）</p>` : ""}
+          <div class="setrow"><button class="primary" data-past="exam">本番形式で通す</button>
+            <label>制限時間 <select data-past="limit">${opts.map(m => `<option value="${m}"${m === lim ? " selected" : ""}>${m ? m + "分" : "なし"}</option>`).join("")}</select></label>
+            <button class="ghost" data-past="practice">1問ずつ解く</button></div></div>`;
+      }).join("");
+    $$(".pastrow", box).forEach(row => {
+      const e = EXAMS[+row.dataset.x], st = () => (PAST[e.name] = PAST[e.name] || { runs: [] });
+      $("[data-past=limit]", row).onchange = ev => { st().limit = +ev.target.value; savePast(); };
+      $("[data-past=exam]", row).onclick = () => startExam(e, +$("[data-past=limit]", row).value);
+      $("[data-past=practice]", row).onclick = () => startQuiz({ ...ALL(), past: e.name, count: 0, order: "seq" });
+    });
+  }
+  function startExam(e, minutes) {
+    const exam = { name: e.name, limit: minutes * 60000, timeout: false, last: Date.now() };
+    RUN = { items: e.list.map(p => ({ ...newItem(p), ms: 0 })), i: 0, endless: false, exam };
+    // 表示中の問題に、答え合わせまでの時間を足していく（別画面やタブを離れている間は止める）
+    exam.timer = setInterval(() => {
+      if (!RUN || RUN.exam !== exam) { clearInterval(exam.timer); return; }
+      const now = Date.now(), dt = now - exam.last; exam.last = now;
+      if ($("#view-quiz").hidden || $("#quiz-run").hidden || document.hidden) return;
+      const it = RUN.items[RUN.i];
+      if (it && !it.stop) it.ms += dt;
+      const used = examUsed();
+      if (exam.limit && used >= exam.limit) { exam.timeout = true; showResult(); return; }
+      drawTimer();
+    }, 250);
+    showRun();
+  }
+  const examUsed = () => RUN.items.reduce((s, x) => s + (x.ms || 0), 0);
+  function drawTimer() {
+    const el = $("#timer"); if (!el || !RUN || !RUN.exam) return;
+    const used = examUsed(), lim = RUN.exam.limit;
+    el.textContent = lim ? "残り " + mmss(lim - used) : mmss(used);
+    el.classList.toggle("warn", !!lim && lim - used < 60000);
   }
 
   // ---- 通し演習：全形式・全範囲を節の順に区切って解く。どこまで解いたかを保存して再開できる ----
@@ -441,6 +509,8 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   function renderSetup() {
     $("#quiz-setup").hidden = false; $("#quiz-run").hidden = true; $("#quiz-result").hidden = true;
     renderSeqCard($("#setup-seq"));
+    renderPastCard($("#setup-past"));
+    $("#set-past-l").hidden = !POOL.some(p => p.past);
     const cnt = f => POOL.filter(f).length;
     const groups = [
       ["ch", "範囲", Object.entries(SECTIONS).map(([k, l]) => [k, l, cnt(p => p.ch === k)])],
@@ -456,10 +526,11 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   }
   function readSetup() {
     const vals = n => $$(`#quiz-setup input[name=${n}]:checked`).map(e => e.value);
-    return { chs: vals("ch"), types: vals("type"), srcs: vals("src"), count: +$("#set-count").value, weak: $("#set-weak").checked, order: $("#set-order").value };
+    return { chs: vals("ch"), types: vals("type"), srcs: vals("src"), count: +$("#set-count").value, weak: $("#set-weak").checked, past: $("#set-past").checked, order: $("#set-order").value };
   }
   function filterPool(o) {
-    return POOL.filter(p => o.chs.includes(p.ch) && o.types.includes(p.type) && o.srcs.includes(p.src) && (!o.weak || isWeak(p)));
+    const pastOk = p => !o.past || (o.past === true ? !!p.past : p.past === o.past);
+    return POOL.filter(p => o.chs.includes(p.ch) && o.types.includes(p.type) && o.srcs.includes(p.src) && (!o.weak || isWeak(p)) && pastOk(p));
   }
 
   // ---- 出題 ----
@@ -485,8 +556,10 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     const it = RUN.items[RUN.i], q = it.q, p = it.p;
     const n = RUN.endless ? `${RUN.i + 1}問目（正解 ${RUN.items.filter(x => x.ok).length}）` : `${RUN.i + 1} / ${RUN.items.length}`;
     const pct = RUN.endless ? 100 : Math.round(RUN.i / RUN.items.length * 100);
+    const pastTag = p.past ? `<span class="pasttag">過去問${p.past !== "過去問" ? "：" + esc(p.past) : ""}</span>` : "";
+    const timer = RUN.exam ? `<span class="timer" id="timer"></span>` : "";
     const seqTag = RUN.seq ? `<span class="seqtag">${RUN.seq.retry ? `やり直し${RUN.seq.round > 1 ? RUN.seq.round + "回目" : ""}` : "通し"} ${SEQ_POS.get(p.id)}/${SEQ_LIST.length}</span>` : "";
-    let html = `<div class="qhead"><span>${n}</span>${seqTag}<span class="tag t-${q.type}">${TYPE_LABEL[q.type]}</span><span class="chip">${esc(p.ch)}</span><span class="srcl">${esc(SRC_LABEL[p.src] || "")}${p.name ? "：" + esc(p.name) : ""}</span></div>
+    let html = `<div class="qhead"><span>${n}</span>${timer}${seqTag}${pastTag}<span class="tag t-${q.type}">${TYPE_LABEL[q.type]}</span><span class="chip">${esc(p.ch)}</span><span class="srcl">${esc(SRC_LABEL[p.src] || "")}${p.name ? "：" + esc(p.name) : ""}</span></div>
       <div class="prog"><span style="width:${pct}%"></span></div>
       <div class="qtext">${rich(q.q)}</div><div class="qbody">`;
     switch (q.type) {
@@ -518,6 +591,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     html += `</div><div class="fb" id="fb"></div><div class="actions" id="actions"></div>`;
     $("#quiz-run").innerHTML = html;
     bindQ(it);
+    drawTimer();
   }
 
   const quitBtn = `<button class="ghost" id="quit">終了</button>`;
@@ -581,7 +655,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
       q.left.forEach((_, k) => { const el = $("#a" + k), ok = !giveup && el.value !== "" && it.rorder[+el.value] === q.ans[k]; all = all && ok; mark(el, ok); });
       finish(it, all, "正解：<br>" + q.left.map((l, k) => `${esc(l)} → ${KANA[it.rorder.indexOf(q.ans[k])]}（${esc(q.right[q.ans[k]])}）`).join("<br>"));
     } else if (q.type === "essay") {
-      const el = $("#a0"), v = el.value, nv = norm(v); el.readOnly = true;
+      const el = $("#a0"), v = el.value, nv = norm(v); el.readOnly = true; it.stop = true;
       const kw = (q.kw || []).map(k => `<span class="kw${v && nv.includes(norm(k)) ? " hit" : ""}">${esc(k)}</span>`).join("");
       $("#fb").innerHTML = `<div class="model"><h4>模範解答</h4><div>${rich(q.model)}</div>${kw ? `<h4>キーワード</h4><div>${kw}</div>` : ""}${q.exp ? `<div class="exp">${rich(q.exp)}</div>` : ""}</div>`;
       setActions(`<button class="good-b" data-s="1">○ できた</button><button class="mid-b" data-s="0">△ 一部</button><button class="bad-b" data-s="0">× できなかった</button>`);
@@ -590,7 +664,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   }
 
   function finish(it, ok, ansHtml, allowOverride) {
-    it.ok = ok; record(it.p.id, ok);
+    it.ok = ok; it.stop = true; record(it.p.id, ok);
     $("#fb").innerHTML = `<div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}</div><div class="answer">${ansHtml}</div>${it.q.exp ? `<div class="exp">${rich(it.q.exp)}</div>` : ""}
       ${allowOverride ? `<button class="mini" id="override">正解にする（表記ゆれ）</button>` : ""}`;
     const last = !RUN.endless && RUN.i >= RUN.items.length - 1;
@@ -615,12 +689,45 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
     $("#quiz-run").hidden = true; $("#quiz-result").hidden = false;
     const cut = s => (s = s.split("\n").filter(l => !/^\|/.test(l)).join(" "), esc(s.length > 90 ? s.slice(0, 90) + "…" : s));
     if (RUN.seq) return showSeqResult(done, ok, wrong, cut);
+    if (RUN.exam) return showExamResult(done, ok, wrong, cut);
     $("#quiz-result").innerHTML = `<div class="card"><h2>結果</h2><div class="score"><b>${ok}</b> / ${done.length} 問 <span>${done.length ? Math.round(ok / done.length * 100) : 0}%</span></div>
       ${wrong.length ? `<h3>間違えた問題</h3><ul class="wronglist">${wrong.map(x => `<li><span class="tag t-${x.q.type}">${TYPE_LABEL[x.q.type]}</span> ${cut(x.q.q)}</li>`).join("")}</ul>` : done.length ? "<p>全問正解！</p>" : ""}
       <div class="actions">${wrong.length ? `<button class="primary" id="retry">間違えた問題をもう一度</button>` : ""}<button class="ghost" id="again">出題設定へ</button></div></div>`;
     const r = $("#retry");
     if (r) r.onclick = () => { RUN = { items: shuffle(wrong.map(x => ({ p: x.p, q: x.p.gen ? x.q : x.p.make(), ok: null }))), i: 0, endless: false }; showRun(); };
     $("#again").onclick = () => { RUN = null; renderSetup(); };
+  }
+
+  // 過去問を本番形式で通したときの結果：正答率・解答時間・1問ごとの時間。履歴に残す
+  function showExamResult(done, ok, wrong, cut) {
+    const ex = RUN.exam; clearInterval(ex.timer);
+    const total = RUN.items.length, ms = examUsed();
+    if (!ex.saved) {
+      const st = PAST[ex.name] = PAST[ex.name] || { runs: [] };
+      st.runs = [...st.runs, { at: Date.now(), ok, total, answered: done.length, ms, timeout: ex.timeout }].slice(-20);
+      savePast(); ex.saved = true;
+    }
+    const runs = PAST[ex.name].runs, prev = runs[runs.length - 2];
+    const status = ex.timeout ? "時間切れ" : done.length < total ? "途中で終了" : "";
+    const unanswered = RUN.items.filter(x => x.ok === null);
+    $("#quiz-result").innerHTML = `<div class="card"><h2>${esc(ex.name)}の結果${status ? `（${status}）` : ""}</h2>
+      <div class="score"><b>${ok}</b> / ${total} 問 <span>${pct(ok, total)}%</span></div>
+      <div class="kpis">
+        <div class="kpi"><b>${mmss(ms)}</b><span>解答時間${ex.limit ? `（制限 ${mmss(ex.limit)}）` : ""}</span></div>
+        <div class="kpi"><b>${mmss(done.length ? done.reduce((t, x) => t + x.ms, 0) / done.length : 0)}</b><span>1問あたり</span></div>
+        <div class="kpi"><b>${done.length}</b><span>解いた問題${unanswered.length ? `（未解答 ${unanswered.length}）` : ""}</span></div>
+        ${prev ? `<div class="kpi"><b>${pct(ok, total) - pct(prev.ok, prev.total) >= 0 ? "+" : ""}${pct(ok, total) - pct(prev.ok, prev.total)}pt</b><span>前回比（前回 ${pct(prev.ok, prev.total)}%・${mmss(prev.ms)}）</span></div>` : ""}
+      </div>
+      <h3>1問ごとの結果</h3>
+      <ol class="examlist">${RUN.items.map(x => `<li><span class="emark ${x.ok === null ? "na" : x.ok ? "ok" : "ng"}">${x.ok === null ? "未" : x.ok ? "○" : "×"}</span><span class="chnum">${mmss(x.ms || 0)}</span><span>${cut(x.q.q)}</span></li>`).join("")}</ol>
+      <div class="actions">${wrong.length + unanswered.length ? `<button class="primary" id="retry">間違えた・未解答の ${wrong.length + unanswered.length} 問を練習</button>` : ""}
+        <button class="ghost" id="exam-again">もう一度通す</button><button class="ghost" id="exam-home">ホームへ</button></div>
+      <p class="hint">記録は「過去問」の欄に前回・最高として表示されます。</p></div>`;
+    const e = EXAMS.find(x => x.name === ex.name), lim = ex.limit / 60000;
+    const r = $("#retry");
+    if (r) r.onclick = () => { RUN = { items: [...wrong, ...unanswered].map(x => newItem(x.p)), i: 0, endless: false }; showRun(); };
+    $("#exam-again").onclick = () => startExam(e, lim);
+    $("#exam-home").onclick = () => { RUN = null; location.hash = "#home"; renderHome(); };
   }
 
   // 区切りの結果：間違えた問題だけやり直す／次の区切りへ／ここでやめる
