@@ -176,3 +176,11 @@ table.qt th{background:#e9eef5;font-weight:700}
 .sum table.qt{width:auto;margin:4px 0}
 .sum table.qt th,.sum table.qt td{text-align:center;padding:2px 10px;vertical-align:middle}
 .sum caption{text-align:left;font-weight:700;color:var(--accent);font-size:.88rem;padding-bottom:2px}
+
+/* ---- 通し演習 ---- */
+.seqcard h3{margin:0;color:var(--accent)}
+.seqhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 6px}
+.seqcard .bar{margin-bottom:8px}
+.seqcard .setrow{margin:10px 0 0}
+#quiz-result .seqhead{margin-top:12px}
+.seqtag{font-size:.74rem;font-weight:700;padding:1px 8px;border-radius:99px;background:#e9eef5;color:var(--accent);font-variant-numeric:tabular-nums}
