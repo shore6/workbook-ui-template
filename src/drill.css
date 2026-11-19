@@ -91,8 +91,13 @@ body.sheet .r.show{color:var(--red);background:#fde3e1}
 .tfilters input{flex:1;min-width:180px}
 .term{display:grid;grid-template-columns:minmax(150px,240px) 1fr;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
 .tname small{display:block;color:var(--sub);font-size:.78rem;font-weight:400}
-body.sheet .tname small{display:none}
+body.sheet #term-list:not(.hidedef) .tname small{display:none}
 body.sheet .r.show+small{display:block}
+.tdef .r{font-weight:500}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{background:var(--paper);color:var(--sub);padding:7px 12px;border-radius:0;font-size:.88rem}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:#e9eef5;color:var(--accent);font-weight:700}
 .tdef{font-size:.93rem}
 @media(max-width:600px){.term{grid-template-columns:1fr;gap:2px}}
 

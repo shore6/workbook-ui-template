@@ -297,7 +297,7 @@ function boot() {
 <section id="view-home"><div class="quick" id="quick"></div><div class="card seqcard pastcard" id="home-past"></div><div class="card seqcard" id="home-seq"></div><div class="card" id="home-stats"></div></section>
 <section id="view-summary" hidden><div class="toolbar">${sheetBtn}</div><div id="summary-body"></div></section>
 <section id="view-terms" hidden>
-  <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
+  <div class="toolbar"><div class="tfilters"><input id="term-q" placeholder="検索" type="search"><select id="term-ch"></select></div><div class="seg" id="term-hide" role="group" aria-label="赤シートで隠す側"><button data-hide="term">用語を隠す</button><button data-hide="def">説明を隠す</button></div>${sheetBtn}<span id="term-count" class="hint"></span></div>
   <div class="card" id="term-list"></div></section>
 <section id="view-quiz" hidden>
   <div id="quiz-setup">
@@ -498,11 +498,28 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   document.addEventListener("click", e => { const r = SHEET && e.target.closest(".r"); if (r) r.classList.toggle("show"); });
 
   // ---- 用語集 ----
+  // 赤シートで隠す側：term＝説明を読んで用語を思い出す／def＝用語を見て説明を思い出す（選択は端末に保存）
+  const HIDE_KEY = C.storageKey + ":termhide";
+  let TERM_HIDE = "term";
+  try { if (localStorage.getItem(HIDE_KEY) === "def") TERM_HIDE = "def"; } catch (e) {}
+  function setTermHide(v) {
+    TERM_HIDE = v;
+    try { localStorage.setItem(HIDE_KEY, v); } catch (e) {}
+    renderTerms();
+  }
   function renderTerms() {
     const qv = norm($("#term-q").value || ""), ch = $("#term-ch").value;
     const list = S.terms.filter(g => (!ch || g[0] === ch) && (!qv || norm(g[1] + g[2] + g[3].join("")).includes(qv)));
+    const hideDef = TERM_HIDE === "def";
+    $$("#term-hide button").forEach(b => b.setAttribute("aria-pressed", b.dataset.hide === TERM_HIDE));
     $("#term-count").textContent = list.length + " 語";
-    $("#term-list").innerHTML = list.map(([c, t, d, a]) => `<div class="term"><div class="tname"><span class="r">${esc(t)}</span>${a.length ? `<small>${esc(a.join("／"))}</small>` : ""}</div><div class="tdef"><span class="chip">${esc(c)}</span>${esc(d)}</div></div>`).join("");
+    $("#term-list").classList.toggle("hidedef", hideDef);
+    $("#term-list").innerHTML = list.map(([c, t, d, a]) => {
+      const alt = a.length ? `<small>${esc(a.join("／"))}</small>` : "";
+      const name = hideDef ? `<b>${esc(t)}</b>${alt}` : `<span class="r">${esc(t)}</span>${alt}`;
+      const def = hideDef ? `<span class="r">${esc(d)}</span>` : esc(d);
+      return `<div class="term"><div class="tname">${name}</div><div class="tdef"><span class="chip">${esc(c)}</span>${def}</div></div>`;
+    }).join("");
   }
 
   // ---- 出題設定（選択肢が1つしかない絞り込みは出さない） ----
@@ -768,6 +785,7 @@ ${C.footer ? `<footer>${esc(C.footer)}</footer>` : ""}`;
   // ---- 初期化 ----
   $("#term-ch").innerHTML = `<option value="">すべての節</option>` + Object.keys(SECTIONS).filter(c => S.terms.some(t => t[0] === c)).map(c => `<option value="${esc(c)}">${esc(SECTIONS[c])}</option>`).join("");
   $("#term-q").oninput = renderTerms; $("#term-ch").onchange = renderTerms;
+  $$("#term-hide button").forEach(b => b.onclick = () => setTermHide(b.dataset.hide));
   $$(".sheetbtn").forEach(b => b.onclick = toggleSheet);
   $("#start").onclick = () => startQuiz(readSetup());
   $("#reset").onclick = () => {
