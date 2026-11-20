@@ -87,9 +87,14 @@ body.sheet .r.show{color:var(--red);background:#fde3e1}
 
 /* ---- 用語 ---- */
 .tfilters{display:flex;gap:8px;flex-wrap:wrap;flex:1}
-.tfilters input,.tfilters select{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
-.tfilters input{flex:1;min-width:180px}
-.term{display:grid;grid-template-columns:minmax(150px,240px) 1fr;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+.tfilters input[type=search],.tfilters select{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+.tfilters input[type=search]{flex:1;min-width:180px}
+.term{display:grid;grid-template-columns:auto minmax(150px,240px) 1fr;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+.term.marked{background:#fff8e6}
+.tmark{width:18px;height:18px;margin:3px 0 0;accent-color:var(--accent);cursor:pointer}
+.tonly{display:flex;align-items:center;gap:6px;font-size:.9rem;color:var(--sub);white-space:nowrap}
+.tonly input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.tempty{padding:14px 4px}
 .tname small{display:block;color:var(--sub);font-size:.78rem;font-weight:400}
 body.sheet #term-list:not(.hidedef) .tname small{display:none}
 body.sheet .r.show+small{display:block}
@@ -99,7 +104,7 @@ body.sheet .r.show+small{display:block}
 .seg button+button{border-left:1px solid var(--line)}
 .seg button[aria-pressed="true"]{background:#e9eef5;color:var(--accent);font-weight:700}
 .tdef{font-size:.93rem}
-@media(max-width:600px){.term{grid-template-columns:1fr;gap:2px}}
+@media(max-width:600px){.term{grid-template-columns:auto 1fr;gap:2px 10px}.term .tdef{grid-column:2}}
 
 /* ---- 出題設定 ---- */
 .setgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
